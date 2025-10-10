@@ -1,3 +1,8 @@
+# ============================================================
+# LOCK HOSPITAL DIGITAL HISTORY PROJECT
+# Data Cleanup and Standardization 
+# Author: Megha Khanna
+# ============================================================
 
 ```{r}
 # all the libraries I installed for this process
@@ -13,3 +18,157 @@ library(tidyr)
 
 ```
 I installed DBI, which is required for interfacing R with databases, and RSQLite to enable interaction with SQLite files. Since my datasets were quite large, I transitioned from Excel to SQLite for more efficient querying and storage. To make my project interactive and user-friendly, I chose the Shiny framework and used Plotly to build interactive visualizations.
+```{r}
+
+# --- Load Required Libraries ---
+library(DBI)
+library(RSQLite)
+library(readxl)
+library(dplyr)
+library(stringr)
+
+excel_path  <- "data_raw/DS_Dataset.xlsx"
+sqlite_path <- "data_processed/primary_sources.sqlite"
+
+```
+
+```{r}
+# --- Connect to SQLite Database ---
+con <- dbConnect(RSQLite::SQLite(), sqlite_path)
+# Source: https://cran.r-project.org/web/packages/RSQLite/vignettes/RSQLite.html
+
+# --- Import Excel Sheets and Write to SQLite Tables ---
+sheets <- excel_sheets(excel_path)
+for (sheet in sheets) {
+  data <- read_excel(excel_path, sheet = sheet)
+  dbWriteTable(con, sheet, data, overwrite = TRUE)
+}
+# Source: https://www.rdocumentation.org/packages/DBI/versions/1.2.2/topics/dbWriteTable
+
+# --- Verify Tables Created ---
+dbListTables(con)
+
+```
+```{r}
+# --- Standardize Legislative Act Names ---
+# Purpose: Harmonize historical references to the Contagious Diseases Acts
+#          and Cantonment Acts for consistency across reports.
+# Sources:
+# - DBI::dbExecute(): https://www.rdocumentation.org/packages/DBI/versions/1.2.2/topics/dbExecute
+
+replacements <- list(
+  "Act XIV/1868"                       = "Act XIV of 1868",
+  "Contagious Diseases Act XIV (1868)" = "Act XIV of 1868",
+  "Act XXII/1864"                      = "Act XXII of 1864",
+  "Cantonment Act XXII (1864)"         = "Act XXII of 1864"
+)
+
+for (old_value in names(replacements)) {
+  new_value <- replacements[[old_value]]
+  query <- sprintf(
+    "UPDATE Hospitals
+     SET act = '%s'
+     WHERE act = '%s';",
+    new_value, old_value
+  )
+  dbExecute(con, query)
+}
+
+# Verify updates worked
+dbGetQuery(con, "SELECT DISTINCT act FROM Hospitals LIMIT 5")
+
+```
+```{r}
+# --- Standardize Hospital Classifications ---
+# Purpose: Normalize inconsistent text values (e.g., "1st Class") into uniform categories.
+
+dbExecute(con, "UPDATE Hospitals SET class = 'First Class'  WHERE class IN ('1st Class')")
+dbExecute(con, "UPDATE Hospitals SET class = 'Second Class' WHERE class IN ('2nd Class','First/Second Class')")
+dbExecute(con, "UPDATE Hospitals SET class = 'Third Class'  WHERE class IN ('3rd Class','Third Class (formerly Second)')")
+dbExecute(con, "UPDATE Hospitals SET class = 'Second Class' WHERE class LIKE 'First Class to 1 Sept%'")
+
+```
+```{r}
+# --- Standardize Country and Region Names ---
+# Purpose: Consolidate colonial-era territorial references for historical accuracy.
+# Sources: https://www.rdocumentation.org/packages/DBI/versions/1.2.2/topics/dbExecute
+
+# Country-level harmonization
+dbExecute(con, "UPDATE women_admission  SET country = 'British India' WHERE country = 'India'")
+dbExecute(con, "UPDATE troops_admission SET country = 'British India' WHERE country = 'India'")
+dbExecute(con, "UPDATE women_admission  SET country = 'British Burma' WHERE country = 'Burma, India (British Burma)'")
+dbExecute(con, "UPDATE troops_admission SET country = 'British Burma' WHERE country = 'Burma, India (British Burma)'")
+
+# Region-level harmonization
+dbExecute(con, "UPDATE women_admission  SET region = 'Madras Presidency' WHERE region = 'Madras Region'")
+dbExecute(con, "UPDATE troops_admission SET region = 'Madras Presidency' WHERE region = 'Madras Region'")
+dbExecute(con, "UPDATE women_admission  SET region = 'British Burma Division' WHERE region IN ('Burma','British Burma')")
+dbExecute(con, "UPDATE troops_admission SET region = 'British Burma Division' WHERE region IN ('Burma','British Burma')")
+
+```
+```{r}
+# --- Clean and Convert Staff Data Columns ---
+# Purpose: Extract numeric counts from descriptive staff fields for quantitative analysis.
+# Sources:
+# - dplyr::mutate(): https://www.rdocumentation.org/packages/dplyr/versions/1.1.4/topics/mutate
+# - stringr::str_extract(): https://www.rdocumentation.org/packages/stringr/versions/1.5.1/topics/str_extract
+
+# Read the Hospitals table
+hospitals <- dbReadTable(con, "Hospitals")
+
+# Extract numbers and convert to integers
+hospitals_cleaned <- hospitals %>%
+  mutate(
+    staff_medical_officers    = as.integer(str_extract(staff_medical_officers, "\\d+")),
+    staff_hospital_assistants = as.integer(str_extract(staff_hospital_assistants, "\\d+")),
+    staff_matron              = as.integer(str_extract(staff_matron, "\\d+")),
+    staff_coolies             = as.integer(str_extract(staff_coolies, "\\d+")),
+    staff_peons               = as.integer(str_extract(staff_peons, "\\d+")),
+    staff_watermen            = as.integer(str_extract(staff_watermen, "\\d+"))
+  )
+
+# Write the cleaned version back into the database
+dbWriteTable(con, "Hospitals", hospitals_cleaned, overwrite = TRUE)
+
+# Final small regional fix
+dbExecute(con, "
+  UPDATE troops_admission
+  SET region = 'Madras Presidency'
+  WHERE region = 'Madras Region'
+")
+
+```
+```{r}
+# --- Standardize Country and Region Names ---
+# Purpose: Standardize region and country names for all future datasets.
+# Source: Inspired by CRAN’s dplyr::case_when() and string standardization workflows
+# https://www.rdocumentation.org/packages/dplyr/versions/1.1.4/topics/case_when
+
+standardize_rc <- function(df) {
+  df %>%
+    mutate(
+      region = case_when(
+        region %in% c("Burma", "Burma (Madras Presidency Civil)", "India (British Burma)") ~ "British Burma",
+        region %in% c("Madras Presidency", "Madras Presidency (Civil)") ~ "Madras Presidency",
+        TRUE ~ region
+      ),
+      country = case_when(
+        country %in% c("India", "British India; India", "British India", "India (British)") ~ "British India",
+        country %in% c("Burma", "India (British Burma)") ~ "British Burma",
+        TRUE ~ country
+      )
+    )
+}
+
+```
+
+
+```{r}
+dbListTables(con)
+dbGetQuery(con, "SELECT DISTINCT class FROM Hospitals LIMIT 5")
+
+# --- Close Connection ---
+dbDisconnect(con)
+
+```
+
