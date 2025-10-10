@@ -1,0 +1,8 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+data_raw/*.pdf
+data_raw/*.pdf
+data_processed/*.sqlite
+*.DS_Store

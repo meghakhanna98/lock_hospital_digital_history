@@ -1,0 +1,15 @@
+
+```{r}
+# all the libraries I installed for this process
+library(DBI)
+library(RSQLite)
+library(readxl)
+library(dplyr)
+library(stringr)
+library(shiny)
+library(plotly)
+library(tidytext)
+library(tidyr)
+
+```
+I installed DBI, which is required for interfacing R with databases, and RSQLite to enable interaction with SQLite files. Since my datasets were quite large, I transitioned from Excel to SQLite for more efficient querying and storage. To make my project interactive and user-friendly, I chose the Shiny framework and used Plotly to build interactive visualizations.
