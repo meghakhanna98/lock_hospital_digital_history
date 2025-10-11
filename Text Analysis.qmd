@@ -1,0 +1,322 @@
+```{r}
+# --- Libraries ---
+library(pdftools)
+library(dplyr)
+library(tidytext)
+library(stringr)
+library(ggplot2)
+```
+
+
+```{r}
+pdf_files <- c(
+  "/Users/meghakhanna/Desktop/Primary Sources/Madras 1-merged.pdf",
+  "/Users/meghakhanna/Desktop/Primary Sources/Burma.pdf",
+  "/Users/meghakhanna/Desktop/Primary Sources/Annual report on the working of the lock hospitals in the Central Provinces-1877.pdf",
+  "/Users/meghakhanna/Desktop/Primary Sources/Fifth annual report of the working of the lock-hospitals in the North-Western Provinces and Oudh for the year 1878-merged.pdf",
+  "/Users/meghakhanna/Desktop/Primary Sources/Punjab 1-merged.pdf"
+)
+
+```
+```{r}
+list.files()
+
+```
+
+```{r}
+# --- Extract text from PDFs ---
+all_reports <- lapply(pdf_files, function(file) {
+  text <- pdf_text(file)
+  tibble(
+    doc = file,
+    page = seq_along(text),
+    text = text
+  )
+}) %>%
+  bind_rows()
+```
+
+
+```{r}
+# --- Tokenize into words ---
+tokens <- all_reports %>%
+  unnest_tokens(word, text)
+
+# --- Remove stopwords, numbers, and junk ---
+custom_stop <- c(
+  "rs","avg","total","est", # filler
+  "jan","january","feb","march","april","may","june","july","aug","august",
+  "sept","september","oct","october","nov","november","dec","december" # months
+)
+
+tokens <- tokens %>%
+  anti_join(stop_words, by = "word") %>%          # remove English stopwords
+  filter(!str_detect(word, "^[0-9.]+$")) %>%      # remove numbers + decimals
+  filter(!str_detect(word, "^[^a-zA-Z]+$")) %>%   # remove punctuation/symbols
+  filter(!word %in% custom_stop)
+```
+
+
+```{r}
+# --- Word frequencies per report ---
+word_freq <- tokens %>%
+  count(doc, word, sort = TRUE)
+
+# View top 30 words per doc
+top_words <- word_freq %>%
+  group_by(doc) %>%
+  slice_max(order_by = n, n = 30) %>%
+  ungroup()
+
+print(top_words)
+```
+
+
+```{r}
+# --- TF-IDF analysis (distinctive terms per report) ---
+tfidf_terms <- word_freq %>%
+  bind_tf_idf(word, doc, n) %>%
+  group_by(doc) %>%
+  slice_max(order_by = tf_idf, n = 15) %>%
+  ungroup()
+
+print(tfidf_terms)
+
+# --- Apply name map to documents ---
+# --- Create a clean name lookup ---
+name_map <- c(
+  "Madras 1-merged.pdf" = "Madras",
+  "Burma.pdf" = "Burma",
+  "Annual report on the working of the lock hospitals in the Central Provinces-1877.pdf" = "Central Provinces",
+  "Fifth annual report of the working of the lock-hospitals in the North-Western Provinces and Oudh for the year 1878-merged.pdf" = "North-Western Provinces and Oudh",
+  "Punjab 1-merged.pdf" = "Punjab"
+)
+
+# --- Apply the mapping ---
+top_words <- top_words %>%
+  mutate(doc = recode(doc, !!!name_map))
+
+# --- Plot again with clean names ---
+ggplot(top_words, aes(x = reorder_within(word, n, doc), y = n, fill = doc)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~doc, scales = "free") +
+  scale_x_reordered() +
+  coord_flip() +
+  labs(title = "Top Words in Each Lock Hospital Report",
+       x = "Word", y = "Frequency")
+
+
+```
+
+
+```{r}
+# --- Libraries ---
+library(pdftools)
+library(dplyr)
+library(tidytext)
+library(stringr)
+
+# --- Set working directory ---
+setwd("/Users/meghakhanna/Desktop/Primary Sources")
+
+# --- PDFs to read ---
+pdf_files <- c(
+  "Madras 1-merged.pdf",
+  "Burma.pdf",
+  "Annual report on the working of the lock hospitals in the Central Provinces-1877.pdf",
+  "Fifth annual report of the working of the lock-hospitals in the North-Western Provinces and Oudh for the year 1878-merged.pdf",
+  "Punjab 1-merged.pdf"
+)
+
+# --- Extract all text ---
+all_reports <- lapply(pdf_files, function(file) {
+  text <- pdf_text(file)
+  tibble(
+    doc = file,
+    page = seq_along(text),
+    text = text
+  )
+}) %>%
+  bind_rows()
+
+# --- Tokenize ---
+tokens <- all_reports %>%
+  unnest_tokens(word, text)
+
+# --- Stopwords ---
+custom_stop <- c(
+  "rs","avg","total","est",
+  "jan","january","feb","march","april","may","june","july","aug","august",
+  "sept","september","oct","october","nov","november","dec","december",
+  "report","medical","officer","surgeon","committee","statement" # admin filler
+)
+
+tokens <- tokens %>%
+  anti_join(stop_words, by = "word") %>%
+  filter(!str_detect(word, "^[0-9.]+$")) %>%
+  filter(!str_detect(word, "^[^a-zA-Z]+$")) %>%
+  filter(!word %in% custom_stop)
+
+# --- Categorize into Women vs Troops ---
+women_keywords <- c("women","woman","prostitute","prostitutes","registered","register",
+                    "gonorrhoea","syphilis","venereal","attendance","imprisonment","fined","examination","absentees","leucorrhoea", "unattended", "detained", "admitted","died")
+
+troops_keywords <- c("troop","soldier","strength","invalided","admitted","died","station",
+                     "cantonment","barrack","men","regiment","military","european","native",
+                     "gonorrhoea","syphilis","venereal","attendance","imprisonment","fined",
+                    "examination","absentees","leucorrhoea")
+
+tokens <- tokens %>%
+  mutate(group = case_when(
+    word %in% women_keywords ~ "Women",
+    word %in% troops_keywords ~ "Troops",
+    TRUE ~ "Other"
+  ))
+
+# --- Word counts per group ---
+word_freq_grouped <- tokens %>%
+  filter(group != "Other") %>%
+  count(group, word, sort = TRUE)
+
+print(word_freq_grouped)
+
+# --- Top 20 words per group ---
+top_words_grouped <- word_freq_grouped %>%
+  group_by(group) %>%
+  slice_max(order_by = n, n = 60) %>%
+  ungroup()
+
+print(top_words_grouped)
+
+```
+```{r}
+# --- Visualization: Top words by group ---
+library(ggplot2)
+library(tidytext) # for reorder_within and scale_x_reordered
+
+ggplot(top_words_grouped, aes(x = reorder_within(word, n, group), y = n, fill = group)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~group, scales = "free") +
+  scale_x_reordered() +
+  coord_flip() +
+  labs(
+    title = "Top 60 Words Associated with Women vs Troops in Lock Hospital Reports",
+    x = "Word",
+    y = "Frequency"
+  )
+
+
+```
+```{r}
+# --- Libraries ---
+library(shiny)
+library(pdftools)
+library(dplyr)
+library(tidytext)
+library(stringr)
+library(ggplot2)
+
+# --- PDFs ---
+pdf_files <- c(
+  "Madras 1-merged.pdf",
+  "Burma.pdf",
+  "Annual report on the working of the lock hospitals in the Central Provinces-1877.pdf",
+  "Fifth annual report of the working of the lock-hospitals in the North-Western Provinces and Oudh for the year 1878-merged.pdf",
+  "Punjab 1-merged.pdf"
+)
+
+# --- Preprocess once at startup ---
+all_reports <- lapply(pdf_files, function(file) {
+  text <- pdf_text(file)
+  tibble(doc = file, page = seq_along(text), text = text)
+}) %>% bind_rows()
+
+tokens <- all_reports %>%
+  unnest_tokens(word, text)
+
+custom_stop <- c("rs","avg","total","est",
+                 "jan","january","feb","march","april","may","june","july","aug","august",
+                 "sept","september","oct","october","nov","november","dec","december",
+                 "report","medical","officer","surgeon","committee","statement")
+
+tokens <- tokens %>%
+  anti_join(stop_words, by = "word") %>%
+  filter(!str_detect(word, "^[0-9.]+$")) %>%
+  filter(!str_detect(word, "^[^a-zA-Z]+$")) %>%
+  filter(!word %in% custom_stop)
+
+# Keyword groups
+women_keywords <- c("women","woman","prostitute","prostitutes","registered","register",
+                    "gonorrhoea","syphilis","venereal","attendance","imprisonment",
+                    "fined","examination","absentees","leucorrhoea","unattended",
+                    "detained","admitted","died")
+
+troops_keywords <- c("troop","soldier","strength","invalided","admitted","died","station",
+                     "cantonment","barrack","men","regiment","military","european","native",
+                     "gonorrhoea","syphilis","venereal","attendance","imprisonment","fined",
+                     "examination","absentees","leucorrhoea")
+
+tokens <- tokens %>%
+  mutate(group = case_when(
+    word %in% women_keywords ~ "Women",
+    word %in% troops_keywords ~ "Troops",
+    TRUE ~ "Other"
+  ))
+
+# --- Shiny App ---
+ui <- fluidPage(
+  titlePanel("Lock Hospital Reports: Text Analysis"),
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("doc", "Choose a report:",
+                  choices = unique(tokens$doc)),
+      radioButtons("view", "View mode:",
+                   choices = c("Top words per document", "Grouped: Women vs Troops"),
+                   selected = "Top words per document"),
+      sliderInput("top_n", "Number of words to show:",
+                  min = 10, max = 60, value = 30)
+    ),
+    mainPanel(
+      plotOutput("wordPlot")
+    )
+  )
+)
+
+server <- function(input, output) {
+  output$wordPlot <- renderPlot({
+    if (input$view == "Top words per document") {
+      df <- tokens %>%
+        filter(doc == input$doc) %>%
+        count(word, sort = TRUE) %>%
+        slice_max(order_by = n, n = input$top_n)
+      
+      ggplot(df, aes(x = reorder(word, n), y = n)) +
+        geom_col(fill = "steelblue") +
+        coord_flip() +
+        labs(title = paste("Top", input$top_n, "Words in", input$doc),
+             x = "Word", y = "Frequency")
+      
+    } else {
+      df <- tokens %>%
+        filter(group %in% c("Women","Troops")) %>%
+        count(group, word, sort = TRUE) %>%
+        group_by(group) %>%
+        slice_max(order_by = n, n = input$top_n) %>%
+        ungroup()
+      
+      ggplot(df, aes(x = reorder_within(word, n, group), y = n, fill = group)) +
+        geom_col(show.legend = FALSE) +
+        facet_wrap(~group, scales = "free") +
+        scale_x_reordered() +
+        coord_flip() +
+        labs(title = paste("Top", input$top_n, "Words by Group"),
+             x = "Word", y = "Frequency")
+    }
+  })
+}
+
+shinyApp(ui, server)
+
+```
+
+

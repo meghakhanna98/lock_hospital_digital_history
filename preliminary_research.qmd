@@ -1,1 +1,81 @@
 Preliminary research
+```{r}
+# Summarize Data
+con <- dbConnect(RSQLite::SQLite(), "data_processed/primary_sources.sqlite")
+women <- dbReadTable(con, "women_admission")
+troops <- dbReadTable(con, "troops_admission")
+hosp <- dbReadTable(con, "Hospitals")
+
+summary(women)
+summary(troops)
+summary(hosp)
+
+dplyr::count(hosp, region)
+
+```
+
+```{r}
+# --- Summarize Data 
+women <- dbReadTable(con, "women_admission")
+troops <- dbReadTable(con, "troops_admission")
+```
+
+
+```{r}
+# Summarize totals by region and year
+women_summary <- women %>%
+  group_by(region, year) %>%
+  summarise(total_women = sum(women_end_register, na.rm = TRUE), .groups = "drop")
+
+troops_summary <- troops %>%
+  group_by(region, year) %>%
+  summarise(total_troops = sum(avg_strength, na.rm = TRUE), .groups = "drop")
+
+# Merge summaries
+compare_data <- full_join(women_summary, troops_summary, by = c("region", "year"))
+
+# --- Shiny App ---
+ui <- fluidPage(
+  titlePanel("Comparison of Women vs. Troops by Region"),
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("region", "Choose Region:",
+                  choices = unique(compare_data$region),
+                  selected = unique(compare_data$region)[1])
+    ),
+    mainPanel(
+      plotlyOutput("interactive_plot")
+    )
+  )
+)
+
+server <- function(input, output) {
+  output$interactive_plot <- renderPlotly({
+    df <- compare_data %>% filter(region == input$region)
+    plot_ly(df, x = ~year) %>%
+      add_lines(y = ~total_women, name = "Women (registered)", line = list(color = 'blue')) %>%
+      add_lines(y = ~total_troops, name = "Troops (men strength)", line = list(color = 'red')) %>%
+      layout(
+        yaxis = list(title = "Counts"),
+        xaxis = list(title = "Year"),
+        title = paste("Region:", input$region)
+      )
+  })
+}
+
+shinyApp(ui = ui, server = server)
+
+```
+
+```{r}
+# --- Close the Database Connection ---
+dbDisconnect(con)
+
+
+```
+Citations:
+https://cran.r-project.org/web/packages/DBI/DBI.pdf
+https://cran.r-project.org/web/packages/RSQLite/RSQLite.pdf
+https://cran.r-project.org/web/packages/shiny/shiny.pdf
+https://cran.r-project.org/web/packages/plotly/plotly.pdf
+
