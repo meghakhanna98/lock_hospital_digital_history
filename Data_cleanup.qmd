@@ -162,13 +162,3 @@ standardize_rc <- function(df) {
 
 ```
 
-
-```{r}
-dbListTables(con)
-dbGetQuery(con, "SELECT DISTINCT class FROM Hospitals LIMIT 5")
-
-# --- Close Connection ---
-dbDisconnect(con)
-
-```
-
