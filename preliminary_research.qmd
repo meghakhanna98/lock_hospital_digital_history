@@ -1,6 +1,10 @@
 Preliminary research
 ```{r}
-# Summarize Data
+library(DBI)
+library(RSQLite)
+library(plotly)
+library(shiny)
+
 con <- dbConnect(RSQLite::SQLite(), "data_processed/primary_sources.sqlite")
 women <- dbReadTable(con, "women_admission")
 troops <- dbReadTable(con, "troops_admission")
@@ -12,12 +16,6 @@ summary(hosp)
 
 dplyr::count(hosp, region)
 
-```
-
-```{r}
-# --- Summarize Data 
-women <- dbReadTable(con, "women_admission")
-troops <- dbReadTable(con, "troops_admission")
 ```
 
 
@@ -33,7 +31,45 @@ troops_summary <- troops %>%
 
 # Merge summaries
 compare_data <- full_join(women_summary, troops_summary, by = c("region", "year"))
+```
+```{r}
+library(dplyr)
+library(ggplot2)
 
+# --- Summarize totals by region and year ---
+women_summary <- women %>%
+  group_by(region, year) %>%
+  summarise(total_women = sum(women_end_register, na.rm = TRUE), .groups = "drop")
+
+troops_summary <- troops %>%
+  group_by(region, year) %>%
+  summarise(total_troops = sum(avg_strength, na.rm = TRUE), .groups = "drop")
+
+# --- Merge summaries ---
+compare_data <- full_join(women_summary, troops_summary, by = c("region", "year"))
+
+# --- Visualization with ggplot2 ---
+ggplot(compare_data, aes(x = year)) +
+  geom_line(aes(y = total_women, color = "Women (registered)"), linewidth = 1) +
+  geom_line(aes(y = total_troops, color = "Troops (average strength)"), linewidth = 1) +
+  facet_wrap(~ region, scales = "free_y") +
+  scale_color_manual(values = c("Women (registered)" = "blue", "Troops (average strength)" = "red")) +
+  labs(
+    title = "Comparison of Women and Troops Across Regions (by Year)",
+    x = "Year",
+    y = "Count",
+    color = "Category"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    legend.position = "bottom"
+  )
+
+```
+
+
+```{r}
 # --- Shiny App ---
 ui <- fluidPage(
   titlePanel("Comparison of Women vs. Troops by Region"),
@@ -53,8 +89,8 @@ server <- function(input, output) {
   output$interactive_plot <- renderPlotly({
     df <- compare_data %>% filter(region == input$region)
     plot_ly(df, x = ~year) %>%
-      add_lines(y = ~total_women, name = "Women (registered)", line = list(color = 'blue')) %>%
-      add_lines(y = ~total_troops, name = "Troops (men strength)", line = list(color = 'red')) %>%
+      add_lines(y = ~total_women, name = "No. of registered women", line = list(color = 'blue')) %>%
+      add_lines(y = ~total_troops, name = "No. of men", line = list(color = 'red')) %>%
       layout(
         yaxis = list(title = "Counts"),
         xaxis = list(title = "Year"),
@@ -68,9 +104,7 @@ shinyApp(ui = ui, server = server)
 ```
 
 ```{r}
-# --- Close the Database Connection ---
 dbDisconnect(con)
-
 
 ```
 Citations:
@@ -79,3 +113,6 @@ https://cran.r-project.org/web/packages/RSQLite/RSQLite.pdf
 https://cran.r-project.org/web/packages/shiny/shiny.pdf
 https://cran.r-project.org/web/packages/plotly/plotly.pdf
 
+For my preliminary research, I wanted to compare the numerical trends between  man and women in the lock hospitals database. The question I had in mind was how did the number of regulated women vary in proportion to the number of troops present, across different regions and years? The thing that needs to be remembered here is that this data is missing for certain years and hence the interrupted graphs and the women doesnt give us the full information because it is only for registered ones but the unregistered women were not coming to the hospitals
+
+Across all regions, troop counts (thousands to tens of thousands) far exceed registered women (hundreds at most). This is important context: the system regulates a small female population against a very large male garrison.
